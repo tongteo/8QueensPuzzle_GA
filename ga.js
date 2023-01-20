@@ -88,8 +88,6 @@ async function sleep(ms) {
 
 // Solve the 8 queen problem using genetic algorithm
 let solutions = [];
-
-// Solve the 8 queen problem using genetic algorithm
 async function solve() {
   let bestSolution;
   let bestFitness = 8;
