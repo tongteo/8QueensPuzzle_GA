@@ -1,17 +1,18 @@
-const solveBtn     = document.getElementById("solveBtn");
-const resetBtn     = document.getElementById("resetBtn");
-const genValEl     = document.getElementById("genVal");
-const fitValEl     = document.getElementById("fitVal");
-const statusEl     = document.getElementById("status");
-const chessboard   = document.getElementById("chessboard");
+const solveBtn   = document.getElementById("solveBtn");
+const resetBtn   = document.getElementById("resetBtn");
+const genValEl   = document.getElementById("genVal");
+const fitValEl   = document.getElementById("fitVal");
+const statusEl   = document.getElementById("status");
+const chessboard = document.getElementById("chessboard");
 
-const POPULATION_SIZE = 200;
-const MUTATION_RATE   = 0.01;
+const POPULATION_SIZE   = 200;
+const MUTATION_RATE     = 0.01;
+const STAGNATION_LIMIT  = 100;
 
 let population = [];
-let isSolving  = false;
+let rafId      = null; // requestAnimationFrame handle
 
-// ── Board setup ──────────────────────────────────────────────────────────────
+// ── Board ────────────────────────────────────────────────────────────────────
 
 function buildBoard() {
   chessboard.innerHTML = "";
@@ -24,138 +25,134 @@ function buildBoard() {
   }
 }
 
-function renderBoard(solution) {
-  for (let r = 0; r < 8; r++) {
+function clearBoard() {
+  for (let r = 0; r < 8; r++)
     for (let c = 0; c < 8; c++) {
       const td = chessboard.rows[r].cells[c];
-      const base = (r + c) % 2 === 0 ? "light" : "dark";
-      td.className = base;
+      td.className = (r+c)%2===0 ? "light" : "dark";
       td.textContent = "";
-      if (solution && solution[r] === c) {
-        td.classList.add("queen");
-        td.textContent = "♛";
-      }
     }
-  }
+  _prev = null;
 }
 
-// ── GA helpers ───────────────────────────────────────────────────────────────
+let _prev = null;
+function renderBoard(sol) {
+  for (let r = 0; r < 8; r++) {
+    const p = _prev ? _prev[r] : -1;
+    const c = sol   ? sol[r]   : -1;
+    if (p === c) continue;
+    if (p >= 0) { const td = chessboard.rows[r].cells[p]; td.className = (r+p)%2===0?"light":"dark"; td.textContent=""; }
+    if (c >= 0) { const td = chessboard.rows[r].cells[c]; td.className = ((r+c)%2===0?"light":"dark")+" queen"; td.textContent="♛"; }
+  }
+  _prev = sol ? [...sol] : null;
+}
 
-const randomSolution = () => Array.from({length: 8}, () => Math.floor(Math.random() * 8));
+// ── GA ───────────────────────────────────────────────────────────────────────
+
+const rand8 = () => Math.floor(Math.random() * 8);
+const randPop = () => Array.from({length: 8}, rand8);
 
 function fitness(sol) {
-  let conflicts = 0;
+  let n = 0;
   for (let i = 0; i < 8; i++)
-    for (let j = i + 1; j < 8; j++)
-      if (sol[i] === sol[j] || Math.abs(sol[i] - sol[j]) === j - i)
-        conflicts++;
-  return conflicts;
+    for (let j = i+1; j < 8; j++)
+      if (sol[i]===sol[j] || Math.abs(sol[i]-sol[j])===j-i) n++;
+  return n;
 }
 
 function initPopulation() {
-  population = Array.from({length: POPULATION_SIZE}, randomSolution);
+  population = Array.from({length: POPULATION_SIZE}, randPop);
 }
 
-// Tournament selection: pick best of 5 random candidates
 function tournament() {
-  let best = population[Math.floor(Math.random() * POPULATION_SIZE)];
-  for (let i = 1; i < 5; i++) {
-    const candidate = population[Math.floor(Math.random() * POPULATION_SIZE)];
-    if (fitness(candidate) < fitness(best)) best = candidate;
+  let best = population[Math.floor(Math.random()*POPULATION_SIZE)];
+  for (let i=1; i<5; i++) {
+    const c = population[Math.floor(Math.random()*POPULATION_SIZE)];
+    if (fitness(c) < fitness(best)) best = c;
   }
   return best;
 }
 
 function nextGeneration() {
-  // Keep top 10% (elitism)
-  const sorted = [...population].sort((a, b) => fitness(a) - fitness(b));
-  const eliteCount = Math.floor(POPULATION_SIZE * 0.1);
-  const newPop = sorted.slice(0, eliteCount);
-
+  const sorted = [...population].sort((a,b) => fitness(a)-fitness(b));
+  const newPop = sorted.slice(0, Math.floor(POPULATION_SIZE*0.1));
   while (newPop.length < POPULATION_SIZE) {
-    const p1 = tournament(), p2 = tournament();
-    const cut = Math.floor(Math.random() * 8);
-    const child = p1.slice(0, cut).concat(p2.slice(cut));
-    for (let g = 0; g < 8; g++)
-      if (Math.random() < MUTATION_RATE) child[g] = Math.floor(Math.random() * 8);
+    const cut = Math.floor(Math.random()*8);
+    const child = tournament().slice(0,cut).concat(tournament().slice(cut));
+    for (let g=0; g<8; g++) if (Math.random()<MUTATION_RATE) child[g]=rand8();
     newPop.push(child);
   }
   population = newPop;
 }
 
-const sleep = ms => new Promise(r => setTimeout(r, ms));
+// ── Solve loop via rAF ───────────────────────────────────────────────────────
 
-// ── Solve ────────────────────────────────────────────────────────────────────
-
-async function solve() {
-  // FIX: reset state at the start of every solve run
+function solve() {
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   initPopulation();
+  _prev = null;
+  clearBoard();
   let generation  = 0;
   let bestFitness = Infinity;
-  let snapshots   = [];   // FIX: local array, not shared global
+  let bestSol     = null;
+  let stagnation  = 0;
 
-  isSolving = true;
   solveBtn.disabled = true;
   resetBtn.disabled = true;
   statusEl.className = "running";
   statusEl.textContent = "Running…";
   fitValEl.className = "value";
 
-  // Evolution loop with stagnation restart
-  let stagnation = 0;
-  const STAGNATION_LIMIT = 100;
+  function step() {
+    // Run several generations per frame to balance speed vs responsiveness
+    for (let batch = 0; batch < 5; batch++) {
+      const prevBest = bestFitness;
 
-  while (bestFitness > 0) {
-    const prevBest = bestFitness;
-    for (const child of population) {
-      const f = fitness(child);
-      if (f < bestFitness) {
-        bestFitness = f;
-        snapshots.push({ sol: [...child], gen: generation });
+      for (const child of population) {
+        const f = fitness(child);
+        if (f < bestFitness) { bestFitness = f; bestSol = [...child]; }
       }
+
+      stagnation = bestFitness < prevBest ? 0 : stagnation + 1;
+      if (stagnation >= STAGNATION_LIMIT) { initPopulation(); stagnation = 0; }
+
+      generation++;
+      if (bestFitness > 0) nextGeneration();
+      if (bestFitness === 0) break;
     }
 
-    if (bestFitness < prevBest) stagnation = 0;
-    else stagnation++;
-
-    // Restart with fresh population if stuck
-    if (stagnation >= STAGNATION_LIMIT) {
-      initPopulation();
-      stagnation = 0;
-    }
-
-    generation++;
+    // Update UI once per frame
     genValEl.textContent = generation;
-    fitValEl.textContent = bestFitness;
-    if (generation % 10 === 0) await sleep(0);
-    if (bestFitness > 0) nextGeneration();
+    fitValEl.textContent = bestFitness === Infinity ? "—" : bestFitness;
+    if (bestSol) renderBoard(bestSol);
+
+    if (bestFitness > 0) {
+      rafId = requestAnimationFrame(step);
+    } else {
+      fitValEl.className = "value success";
+      statusEl.className = "done";
+      statusEl.textContent = `Solved in ${generation} generation${generation!==1?"s":""}!`;
+      solveBtn.disabled = false;
+      resetBtn.disabled = false;
+    }
   }
 
-  // Replay snapshots
-  for (const { sol, gen } of snapshots) {
-    renderBoard(sol);
-    genValEl.textContent = gen + 1;
-    await sleep(50);
-  }
-
-  fitValEl.className = "value success";
-  statusEl.className = "done";
-  statusEl.textContent = `Solved in ${generation} generation${generation !== 1 ? "s" : ""}!`;
-  isSolving = false;
-  solveBtn.disabled = false;
-  resetBtn.disabled = false;
+  rafId = requestAnimationFrame(step);
 }
 
 // ── Reset ────────────────────────────────────────────────────────────────────
 
 function reset() {
+  if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
   initPopulation();
-  renderBoard(null);
+  clearBoard();
   genValEl.textContent = "0";
   fitValEl.textContent = "—";
   fitValEl.className = "value";
   statusEl.className = "";
   statusEl.textContent = "Press Solve to start.";
+  solveBtn.disabled = false;
+  resetBtn.disabled = false;
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
