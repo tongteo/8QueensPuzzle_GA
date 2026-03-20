@@ -1,117 +1,159 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <title>8 Queen Problem</title>
-    <style>
-      /* CSS styles for the table and cells */
-      table {
-        border-collapse: collapse;
-      }
-      td {
-        width: 50px;
-        height: 50px;
-        border: 1px solid black;
-        text-align: center;
-      }
-      /* CSS styles for the queen and empty cells */
-      .queen {
-        background-color: purple;
-      }
-      .empty {
-        background-color: white;
-      }
-    </style>
-  </head>
-  <body>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>8 Queens Puzzle — Genetic Algorithm</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      min-height: 100vh;
+      background: #0f0f1a;
+      color: #e2e8f0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+      gap: 28px;
+    }
+
+    header { text-align: center; }
+    header h1 {
+      font-size: clamp(1.5rem, 4vw, 2.2rem);
+      font-weight: 700;
+      background: linear-gradient(135deg, #a78bfa, #60a5fa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: -0.5px;
+    }
+    header p {
+      margin-top: 6px;
+      font-size: 0.85rem;
+      color: #64748b;
+    }
+
+    /* Stats bar */
+    .stats {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .stat-card {
+      background: #1e1e2e;
+      border: 1px solid #2d2d44;
+      border-radius: 12px;
+      padding: 12px 24px;
+      text-align: center;
+      min-width: 110px;
+    }
+    .stat-card .label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #64748b;
+    }
+    .stat-card .value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #a78bfa;
+      margin-top: 2px;
+      font-variant-numeric: tabular-nums;
+    }
+    .stat-card .value.success { color: #34d399; }
+
+    /* Chessboard */
+    .board-wrapper {
+      background: #1e1e2e;
+      border: 1px solid #2d2d44;
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    }
+    table { border-collapse: collapse; }
+    td {
+      width: clamp(40px, 8vw, 58px);
+      height: clamp(40px, 8vw, 58px);
+      text-align: center;
+      vertical-align: middle;
+      font-size: clamp(1.2rem, 3vw, 1.8rem);
+      transition: background 0.2s;
+    }
+    .light { background: #c8b8f0; }
+    .dark  { background: #6d4fc2; }
+    .queen.light { background: #fde68a; }
+    .queen.dark  { background: #f59e0b; }
+
+    /* Buttons */
+    .controls { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+    button {
+      padding: 12px 32px;
+      border: none;
+      border-radius: 10px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.1s, opacity 0.2s;
+    }
+    button:active { transform: scale(0.97); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    #solveBtn {
+      background: linear-gradient(135deg, #7c3aed, #3b82f6);
+      color: #fff;
+      box-shadow: 0 4px 20px rgba(124,58,237,0.4);
+    }
+    #resetBtn {
+      background: #1e1e2e;
+      color: #a78bfa;
+      border: 1px solid #3d3d5c;
+    }
+    #resetBtn:hover:not(:disabled) { background: #2a2a3e; }
+
+    /* Status message */
+    #status {
+      font-size: 0.85rem;
+      color: #64748b;
+      min-height: 1.2em;
+      text-align: center;
+    }
+    #status.running { color: #60a5fa; }
+    #status.done    { color: #34d399; }
+  </style>
+</head>
+<body>
+
+  <header>
     <h1>8 Queens Puzzle</h1>
-    <table id="chessboard">
-      <!-- Table rows and cells for the chessboard -->
-      <tr>
-        <td id="0,0"></td>
-        <td id="0,1"></td>
-        <td id="0,2"></td>
-        <td id="0,3"></td>
-        <td id="0,4"></td>
-        <td id="0,5"></td>
-        <td id="0,6"></td>
-        <td id="0,7"></td>
-      </tr>
-      <tr>
-        <td id="1,0"></td>
-        <td id="1,1"></td>
-        <td id="1,2"></td>
-        <td id="1,3"></td>
-        <td id="1,4"></td>
-        <td id="1,5"></td>
-        <td id="1,6"></td>
-        <td id="1,7"></td>
-      </tr>
-	  <tr>
-        <td id="2,0"></td>
-        <td id="2,1"></td>
-        <td id="2,2"></td>
-        <td id="2,3"></td>
-        <td id="2,4"></td>
-        <td id="2,5"></td>
-        <td id="2,6"></td>
-        <td id="2,7"></td>
-      </tr>
-      <tr>
-        <td id="3,0"></td>
-        <td id="3,1"></td>
-        <td id="3,2"></td>
-        <td id="3,3"></td>
-        <td id="3,4"></td>
-        <td id="3,5"></td>
-        <td id="3,6"></td>
-        <td id="3,7"></td>
-      </tr>
-	  <tr>
-        <td id="4,0"></td>
-        <td id="4,1"></td>
-        <td id="4,2"></td>
-        <td id="4,3"></td>
-        <td id="4,4"></td>
-        <td id="4,5"></td>
-        <td id="4,6"></td>
-        <td id="4,7"></td>
-      </tr>
-      <tr>
-        <td id="5,0"></td>
-        <td id="5,1"></td>
-        <td id="5,2"></td>
-        <td id="5,3"></td>
-        <td id="5,4"></td>
-        <td id="5,5"></td>
-        <td id="5,6"></td>
-        <td id="5,7"></td>
-      </tr>
-	  <tr>
-        <td id="6,0"></td>
-        <td id="6,1"></td>
-        <td id="6,2"></td>
-        <td id="6,3"></td>
-        <td id="6,4"></td>
-        <td id="6,5"></td>
-        <td id="6,6"></td>
-        <td id="6,7"></td>
-      </tr>
-      <tr>
-        <td id="7,0"></td>
-        <td id="7,1"></td>
-        <td id="7,2"></td>
-        <td id="7,3"></td>
-        <td id="7,4"></td>
-        <td id="7,5"></td>
-        <td id="7,6"></td>
-        <td id="7,7"></td>
-      </tr>
-      <!-- repeat the above rows and cells for the rest of the chessboard -->
-    </table>
-    <br>
-    <button id="solveBtn">Solve</button>
-    <button id="resetBtn">Reset</button>
-	<p id="generation"></p>
-    <script src="ga.js"></script>
-  </body>
+    <p>Solved with a Genetic Algorithm</p>
+  </header>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="label">Generation</div>
+      <div class="value" id="genVal">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Best Fitness</div>
+      <div class="value" id="fitVal">—</div>
+    </div>
+  </div>
+
+  <div class="board-wrapper">
+    <table id="chessboard"></table>
+  </div>
+
+  <div class="controls">
+    <button id="solveBtn">▶ Solve</button>
+    <button id="resetBtn">↺ Reset</button>
+  </div>
+
+  <p id="status">Press Solve to start.</p>
+
+  <script src="ga.js"></script>
+</body>
 </html>

@@ -1,135 +1,166 @@
-const chessboard = document.getElementById("chessboard");
-const solveBtn = document.getElementById("solveBtn");
-const resetBtn = document.getElementById("resetBtn");
-const generationEl = document.getElementById("generation");
+const solveBtn     = document.getElementById("solveBtn");
+const resetBtn     = document.getElementById("resetBtn");
+const genValEl     = document.getElementById("genVal");
+const fitValEl     = document.getElementById("fitVal");
+const statusEl     = document.getElementById("status");
+const chessboard   = document.getElementById("chessboard");
+
+const POPULATION_SIZE = 200;
+const MUTATION_RATE   = 0.01;
 
 let population = [];
-let populationSize = 200;
-let generation = 0;
-let mutationRate = 0.01;
+let isSolving  = false;
 
-// Create the initial population of solutions
+// ── Board setup ──────────────────────────────────────────────────────────────
+
+function buildBoard() {
+  chessboard.innerHTML = "";
+  for (let r = 0; r < 8; r++) {
+    const tr = chessboard.insertRow();
+    for (let c = 0; c < 8; c++) {
+      const td = tr.insertCell();
+      td.className = (r + c) % 2 === 0 ? "light" : "dark";
+    }
+  }
+}
+
+function renderBoard(solution) {
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      const td = chessboard.rows[r].cells[c];
+      const base = (r + c) % 2 === 0 ? "light" : "dark";
+      td.className = base;
+      td.textContent = "";
+      if (solution && solution[r] === c) {
+        td.classList.add("queen");
+        td.textContent = "♛";
+      }
+    }
+  }
+}
+
+// ── GA helpers ───────────────────────────────────────────────────────────────
+
+const randomSolution = () => Array.from({length: 8}, () => Math.floor(Math.random() * 8));
+
+function fitness(sol) {
+  let conflicts = 0;
+  for (let i = 0; i < 8; i++)
+    for (let j = i + 1; j < 8; j++)
+      if (sol[i] === sol[j] || Math.abs(sol[i] - sol[j]) === j - i)
+        conflicts++;
+  return conflicts;
+}
+
 function initPopulation() {
-  for (let i = 0; i < populationSize; i++) {
-    population.push(createSolution());
+  population = Array.from({length: POPULATION_SIZE}, randomSolution);
+}
+
+// Tournament selection: pick best of 5 random candidates
+function tournament() {
+  let best = population[Math.floor(Math.random() * POPULATION_SIZE)];
+  for (let i = 1; i < 5; i++) {
+    const candidate = population[Math.floor(Math.random() * POPULATION_SIZE)];
+    if (fitness(candidate) < fitness(best)) best = candidate;
   }
+  return best;
 }
 
-// Create a random solution
-function createSolution() {
-  let solution = [];
-  for (let i = 0; i < 8; i++) {
-    solution.push(Math.floor(Math.random() * 8));
+function nextGeneration() {
+  // Keep top 10% (elitism)
+  const sorted = [...population].sort((a, b) => fitness(a) - fitness(b));
+  const eliteCount = Math.floor(POPULATION_SIZE * 0.1);
+  const newPop = sorted.slice(0, eliteCount);
+
+  while (newPop.length < POPULATION_SIZE) {
+    const p1 = tournament(), p2 = tournament();
+    const cut = Math.floor(Math.random() * 8);
+    const child = p1.slice(0, cut).concat(p2.slice(cut));
+    for (let g = 0; g < 8; g++)
+      if (Math.random() < MUTATION_RATE) child[g] = Math.floor(Math.random() * 8);
+    newPop.push(child);
   }
-  return solution;
+  population = newPop;
 }
 
-// Evaluate the fitness of a solution
-function evaluateFitness(solution) {
-  let fitness = 0;
-  for (let i = 0; i < 8; i++) {
-    for (let j = i + 1; j < 8; j++) {
-      if (solution[i] === solution[j]) {
-        fitness++;
-      }
-      if (Math.abs(solution[i] - solution[j]) === Math.abs(i - j)) {
-        fitness++;
-      }
-    }
-  }
-  return fitness;
-}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// Select two parents for crossover
-function selection() {
-  let parent1 = population[Math.floor(Math.random() * populationSize)];
-  let parent2 = population[Math.floor(Math.random() * populationSize)];
-  return [parent1, parent2];
-}
+// ── Solve ────────────────────────────────────────────────────────────────────
 
-// Perform crossover on the parents
-function crossover(parents) {
-  let parent1 = parents[0];
-  let parent2 = parents[1];
-  let crossoverPoint = Math.floor(Math.random() * 8);
-  let child = parent1.slice(0, crossoverPoint).concat(parent2.slice(crossoverPoint));
-  return child;
-}
-
-// Perform mutation on a child
-function mutation(child) {
-  for (let i = 0; i < 8; i++) {
-    if (Math.random() < mutationRate) {
-      child[i] = Math.floor(Math.random() * 8);
-    }
-  }
-  return child;
-}
-
-// Update the chessboard with a solution
-function updateChessboard(solution) {
-  for (let i = 0; i < 8; i++) {
-    for (let j = 0; j < 8; j++) {
-      let cell = chessboard.rows[i].cells[j];
-      if (solution[i] === j) {
-        cell.classList.add("queen");
-        cell.classList.remove("empty");
-      } else {
-        cell.classList.add("empty");
-        cell.classList.remove("queen");
-          }
-      }
-    }
-}
-
-async function sleep(ms) {
-  await new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// Solve the 8 queen problem using genetic algorithm
-let solutions = [];
 async function solve() {
-  let bestSolution;
-  let bestFitness = 8;
+  // FIX: reset state at the start of every solve run
+  initPopulation();
+  let generation  = 0;
+  let bestFitness = Infinity;
+  let snapshots   = [];   // FIX: local array, not shared global
+
+  isSolving = true;
+  solveBtn.disabled = true;
+  resetBtn.disabled = true;
+  statusEl.className = "running";
+  statusEl.textContent = "Running…";
+  fitValEl.className = "value";
+
+  // Evolution loop with stagnation restart
+  let stagnation = 0;
+  const STAGNATION_LIMIT = 100;
+
   while (bestFitness > 0) {
-    let newPopulation = [];
-    for (let i = 0; i < populationSize; i++) {
-      let parents = selection();
-      let child = crossover(parents);
-      child = mutation(child);
-      let fitness = evaluateFitness(child);
-      if (fitness < bestFitness) {
-        bestFitness = fitness;
-        bestSolution = child;
-        solutions.push(bestSolution);
+    const prevBest = bestFitness;
+    for (const child of population) {
+      const f = fitness(child);
+      if (f < bestFitness) {
+        bestFitness = f;
+        snapshots.push({ sol: [...child], gen: generation });
       }
-      newPopulation.push(child);
     }
-    population = newPopulation;
+
+    if (bestFitness < prevBest) stagnation = 0;
+    else stagnation++;
+
+    // Restart with fresh population if stuck
+    if (stagnation >= STAGNATION_LIMIT) {
+      initPopulation();
+      stagnation = 0;
+    }
+
     generation++;
+    genValEl.textContent = generation;
+    fitValEl.textContent = bestFitness;
+    if (generation % 10 === 0) await sleep(0);
+    if (bestFitness > 0) nextGeneration();
   }
-  for (let i = 0; i < solutions.length; i++) {
-    updateChessboard(solutions[i]);
-    generationEl.innerHTML = "Generation: " + (i+1);
-    await sleep(40);
+
+  // Replay snapshots
+  for (const { sol, gen } of snapshots) {
+    renderBoard(sol);
+    genValEl.textContent = gen + 1;
+    await sleep(50);
   }
+
+  fitValEl.className = "value success";
+  statusEl.className = "done";
+  statusEl.textContent = `Solved in ${generation} generation${generation !== 1 ? "s" : ""}!`;
+  isSolving = false;
+  solveBtn.disabled = false;
+  resetBtn.disabled = false;
 }
 
-// Reset the chessboard
+// ── Reset ────────────────────────────────────────────────────────────────────
+
 function reset() {
-for (let i = 0; i < 8; i++) {
-for (let j = 0; j < 8; j++) {
-let cell = chessboard.rows[i].cells[j];
-cell.classList.remove("queen");
-cell.classList.add("empty");
-}
-}
-generation = 0;
-population = [];
-initPopulation();
+  initPopulation();
+  renderBoard(null);
+  genValEl.textContent = "0";
+  fitValEl.textContent = "—";
+  fitValEl.className = "value";
+  statusEl.className = "";
+  statusEl.textContent = "Press Solve to start.";
 }
 
-// Initialize the population and add event listeners
+// ── Init ─────────────────────────────────────────────────────────────────────
+
+buildBoard();
 initPopulation();
 solveBtn.addEventListener("click", solve);
 resetBtn.addEventListener("click", reset);
